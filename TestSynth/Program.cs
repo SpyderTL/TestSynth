@@ -17,10 +17,23 @@ namespace TestSynth
 	class Program
 	{
 		static AutoResetEvent BufferEnd;
-		static bool[] MidiNotes = new bool[128];
+		static readonly bool[] MidiNotes = new bool[128];
+		static readonly double[] MidiVelocity = new double[128];
+		static readonly double[] NoteVelocity = new double[128];
+		static readonly int MidiChannel = 0;
+		static readonly double Attack = 255;
+		static readonly double Release = 255;
+
+		static Key[] Keys;
+		static int[] KeyNotes;
+		static int[] KeyOctaves;
 
 		static void Main(string[] args)
 		{
+			Keys = BassKeys;
+			KeyNotes = BassKeyNotes;
+			KeyOctaves = BassKeyOctaves;
+
 			var devices = Midi.midiInGetNumDevs();
 			var deviceHandle = IntPtr.Zero;
 			var deviceCaps = new Midi.MidiInCaps();
@@ -81,18 +94,40 @@ namespace TestSynth
 
 				for (int x = 0; x < data.Length; x += 2)
 				{
+					var delta = 1.0 / format.SampleRate;
+
 					var value = 0d;
 					var count = 0;
 
+					for (var note = 24; note < MidiNotes.Length; note++)
+						MidiNotes[note] = false;
+
 					for (var key = 0; key < Keys.Length; key++)
 					{
+						var noteIndex = 24 + (KeyOctaves[key] * 12) + KeyNotes[key];
+
 						if (keyboardState.IsPressed(Keys[key]))
 						{
-							//value += Waves.Sine(time, Notes[KeyNotes[key]] * KeyOctaves[key], 0.0);
-							value += Waves.Square(time, Notes[KeyNotes[key]] * KeyOctaves[key], 0.0);
-							//value += Waves.Triangle(time, Notes[KeyNotes[key]] * KeyOctaves[key], 0.0);
-							//value += Waves.Sawtooth(time, Notes[KeyNotes[key]] * KeyOctaves[key], 0.0);
-							count++;
+							MidiNotes[noteIndex] = true;
+							MidiVelocity[noteIndex] = 1.0f;
+						}
+					}
+
+					for (var note = 24; note < MidiNotes.Length; note++)
+					{
+						if (MidiNotes[note])
+						{
+							if (NoteVelocity[note] >= 1.0 - (Attack * delta))
+								NoteVelocity[note] = 1.0f;
+							else
+								NoteVelocity[note] += (Attack * delta);
+						}
+						else
+						{
+							if (NoteVelocity[note] <= (Release * delta))
+								NoteVelocity[note] = 0.0f;
+							else
+								NoteVelocity[note] -= (Release * delta);
 						}
 					}
 
@@ -100,9 +135,14 @@ namespace TestSynth
 					{
 						for (var note = 0; note < 12; note++)
 						{
-							if (MidiNotes[24 + (octave * 12) + note])
+							var noteIndex = 24 + (octave * 12) + note;
+
+							if (NoteVelocity[noteIndex] != 0.0)
 							{
-								value += Waves.Sine(time, Notes[note] * MidiOctaves[octave], 0.0);
+								value += Waves.Sine(time, Notes[note] * MidiOctaves[octave], 0.0) * MidiVelocity[noteIndex] * NoteVelocity[noteIndex];
+								//value += Waves.Square(time, Notes[note] * MidiOctaves[octave], 0.0) * MidiVelocity[noteIndex] * NoteVelocity[noteIndex];
+								//value += Waves.Triangle(time, Notes[note] * MidiOctaves[octave], 0.0) * MidiVelocity[noteIndex] * NoteVelocity[noteIndex];
+								value += Waves.Sawtooth(time, Notes[note] * MidiOctaves[octave], 0.0) * MidiVelocity[noteIndex] * NoteVelocity[noteIndex];
 								count++;
 							}
 						}
@@ -113,7 +153,7 @@ namespace TestSynth
 					data[x] = (byte)(value2 & 0xff);
 					data[x + 1] = (byte)(value2 >> 8);
 
-					time += 1.0 / (double)format.SampleRate;
+					time += delta;
 				}
 
 				pointers[index].CopyFrom(data);
@@ -143,17 +183,22 @@ namespace TestSynth
 				var message = status >> 4;
 				var channel = status & 0xf;
 
-				if (message == 0x8)
+				if (channel == MidiChannel)
 				{
-					MidiNotes[note] = false;
+					if (message == 0x8)
+					{
+						MidiNotes[note] = false;
+						MidiVelocity[note] = velocity / 255.0;
 
-					Console.WriteLine("Note Off: " + note + " Velocity: " + velocity + " Channel: " + channel);
-				}
-				else if (message == 0x9)
-				{
-					MidiNotes[note] = true;
+						Console.WriteLine("Note Off: " + note + " Velocity: " + velocity + " Channel: " + channel);
+					}
+					else if (message == 0x9)
+					{
+						MidiNotes[note] = true;
+						MidiVelocity[note] = velocity / 255.0;
 
-					Console.WriteLine("Note On: " + note + " Velocity: " + velocity + " Channel: " + channel);
+						Console.WriteLine("Note On: " + note + " Velocity: " + velocity + " Channel: " + channel);
+					}
 				}
 			}
 		}
@@ -179,7 +224,7 @@ namespace TestSynth
 			493.8833
 		};
 
-		private static readonly Key[] Keys = new Key[]
+		private static readonly Key[] PianoKeys = new Key[]
 		{
 			Key.Q,
 			Key.D2,
@@ -221,7 +266,59 @@ namespace TestSynth
 			Key.Slash
 		};
 
-		private static readonly int[] KeyNotes = new int[]
+		private static readonly Key[] BassKeys = new Key[]
+		{
+			Key.Z,
+			Key.X,
+			Key.C,
+			Key.V,
+			Key.B,
+			Key.N,
+			Key.M,
+			Key.Comma,
+			Key.Period,
+			Key.Slash,
+
+			Key.A,
+			Key.S,
+			Key.D,
+			Key.F,
+			Key.G,
+			Key.H,
+			Key.J,
+			Key.K,
+			Key.L,
+			Key.Semicolon,
+			Key.Apostrophe,
+
+			Key.Q,
+			Key.W,
+			Key.E,
+			Key.R,
+			Key.T,
+			Key.Y,
+			Key.U,
+			Key.I,
+			Key.O,
+			Key.P,
+			Key.LeftBracket,
+			Key.RightBracket,
+			Key.Backslash,
+			Key.D1,
+			Key.D2,
+			Key.D3,
+			Key.D4,
+			Key.D5,
+			Key.D6,
+			Key.D7,
+			Key.D8,
+			Key.D9,
+			Key.D0,
+			Key.Minus,
+			Key.Equals
+		};
+
+		private static readonly int[] PianoKeyNotes = new int[]
 		{
 			0,
 			1,
@@ -264,7 +361,61 @@ namespace TestSynth
 			5
 		};
 
-		private static readonly double[] KeyOctaves = new double[]
+
+		private static readonly int[] BassKeyNotes = new int[]
+		{
+			4,
+			5,
+			6,
+			7,
+			8,
+			9,
+			10,
+			11,
+			0,
+			1,
+
+			9,
+			10,
+			11,
+			0,
+			1,
+			2,
+			3,
+			4,
+			5,
+			6,
+			7,
+
+			2,
+			3,
+			4,
+			5,
+			6,
+			7,
+			8,
+			9,
+			10,
+			11,
+			0,
+			1,
+			2,
+
+			7,
+			8,
+			9,
+			10,
+			11,
+			0,
+			1,
+			2,
+			3,
+			4,
+			5,
+			6
+		};
+
+		private static readonly double[] PianoKeyOctaves = new double[]
 		{
 			1.0,
 			1.0,
@@ -306,6 +457,112 @@ namespace TestSynth
 			1.0,
 			1.0,
 			1.0,
+		};
+
+		//private static readonly double[] BassKeyOctaves = new double[]
+		//{
+		//	0.125,
+		//	0.125,
+		//	0.125,
+		//	0.125,
+		//	0.125,
+		//	0.125,
+		//	0.125,
+		//	0.125,
+		//	0.25,
+		//	0.25,
+
+		//	0.125,
+		//	0.125,
+		//	0.125,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.5,
+		//	0.5,
+		//	0.5,
+
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.25,
+		//	0.5,
+		//	0.5,
+		//	0.5,
+		//	0.5,
+		//	0.5,
+		//	0.5,
+		//	0.5
+		//};
+
+		private static readonly int[] BassKeyOctaves = new int[]
+		{
+			0,
+			0,
+			0,
+			0,
+			0,
+			0,
+			0,
+			0,
+			1,
+			1,
+
+			0,
+			0,
+			0,
+			1,
+			1,
+			1,
+			1,
+			1,
+			1,
+			1,
+			1,
+
+			1,
+			1,
+			1,
+			1,
+			1,
+			1,
+			1,
+			1,
+			1,
+			1,
+			2,
+			2,
+			2,
+
+			1,
+			1,
+			1,
+			1,
+			1,
+			2,
+			2,
+			2,
+			2,
+			2,
+			2,
+			2
 		};
 
 		private static readonly double[] MidiOctaves = new double[]
